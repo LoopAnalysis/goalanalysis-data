@@ -1,0 +1,39 @@
+name: Tahminleri Güncelle
+
+on:
+  schedule:
+    # Her saat başı çalışır (UTC saatine göre - cron her zaman UTC kullanır)
+    - cron: "0 * * * *"
+  # GitHub'ın "Actions" sekmesinden elle de tetikleyebilmen için:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Depoyu indir
+        uses: actions/checkout@v4
+
+      - name: Python kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Bağımlılıkları kur
+        run: pip install requests
+
+      - name: Ham veriyi çek
+        env:
+          SPORTMONKS_API_KEY: ${{ secrets.SPORTMONKS_API_KEY }}
+        run: python fetch_predictions.py
+
+      - name: Sonucu GitHub'a geri kaydet (commit + push)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/raw_data.json
+          git diff --staged --quiet || git commit -m "Otomatik güncelleme: $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push
