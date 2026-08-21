@@ -149,8 +149,11 @@ def main():
         {"include": "participants;league;odds"},
     )
     upcoming_fixtures_raw = list({f["id"]: f for f in upcoming_fixtures_raw}.values())
+    # SADECE henüz oynanmamış maçları tutuyoruz - "önümüzdeki 3 gün" aralığında geçmiş
+    # (o gün içinde ama saati geçmiş) maçlar da geliyor, onları burada ayıklıyoruz.
+    upcoming_fixtures_raw = [f for f in upcoming_fixtures_raw if f.get("state_id") in (None, 1)]
     upcoming_fixtures = [slim_upcoming_fixture(f) for f in upcoming_fixtures_raw]
-    print(f"{len(upcoming_fixtures)} fikstür bulundu")
+    print(f"{len(upcoming_fixtures)} henüz oynanmamış fikstür bulundu")
 
     team_ids = set()
     for fixture in upcoming_fixtures_raw:
