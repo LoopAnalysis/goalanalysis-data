@@ -24,7 +24,9 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
+from threading import Lock
 
 import requests
 
@@ -97,15 +99,30 @@ def main():
     history_end = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
     history_start = (datetime.now(timezone.utc) - timedelta(days=181)).strftime("%Y-%m-%d")
 
-    team_histories = {}
-    for index, team_id in enumerate(sorted(team_ids)):
-        print(f"  [{index + 1}/{len(team_ids)}] takım {team_id} geçmişi çekiliyor...")
+    def fetch_team_history(team_id: int) -> tuple[int, list]:
         fixtures = fetch_all_pages(
             f"fixtures/between/{history_start}/{history_end}/{team_id}",
             {"include": "participants;scores;statistics"},
         )
-        team_histories[str(team_id)] = fixtures
-        time.sleep(0.06)
+        return team_id, fixtures
+
+    # Takımları SIRAYLA değil, AYNI ANDA (paralel) çekiyoruz - 10 takım birden. Sportmonks'un
+    # saatlik kotası (3000 istek) buna rahatça izin veriyor, sadece anlık yoğunluğu (429/504)
+    # kontrol altında tutmak için işçi sayısını makul (10) tutuyoruz.
+    team_histories = {}
+    completed_lock = Lock()
+    completed_count = 0
+    team_id_list = sorted(team_ids)
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(fetch_team_history, tid): tid for tid in team_id_list}
+        for future in as_completed(futures):
+            team_id, fixtures = future.result()
+            team_histories[str(team_id)] = fixtures
+            with completed_lock:
+                completed_count += 1
+                if completed_count % 20 == 0 or completed_count == len(team_id_list):
+                    print(f"  [{completed_count}/{len(team_id_list)}] takım geçmişleri çekildi...")
 
     output = {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
