@@ -7,7 +7,7 @@ Kotlin tarafında (GoalPredictionRepository.kt) yaşıyor, hiç değişmedi.
 Bu script'in tek işi:
   1. Önümüzdeki 3 gün için tüm fikstürleri (maç listesini) Sportmonks'un
      KENDİ ORİJİNAL JSON formatında çeker
-  2. O fikstürlerdeki HER TAKIM için, son 180 günlük geçmişini (yine Sportmonks'un
+  2. O fikstürlerdeki HER TAKIM için, son 120 günlük geçmişini (yine Sportmonks'un
      orijinal formatında) BİR KERE çeker - aynı takım birden fazla maçta geçse bile
      tekrar tekrar çekmez (dedup)
   3. İkisini tek bir JSON dosyasına (docs/raw_data.json) yazar
@@ -63,11 +63,15 @@ def api_get(path: str, params: dict) -> dict:
     raise RuntimeError(f"6 denemeden sonra da başarısız oldu. Son hata: {last_error}")
 
 
-def fetch_all_pages(path: str, params: dict) -> list:
-    """Sportmonks'un KENDİ ORİJİNAL fixture nesnelerini (hiç dönüştürmeden) döner."""
+def fetch_all_pages(path: str, params: dict, max_pages: int = 3) -> list:
+    """Sportmonks'un KENDİ ORİJİNAL fixture nesnelerini (hiç dönüştürmeden) döner.
+    [max_pages]: takım geçmişi çekerken zaten sadece en yeni ~10 maçı kullanıyoruz,
+    o yüzden çok kalabalık takımlar için sonsuza kadar sayfalamaya gerek yok - bu,
+    en aktif takımların (birden fazla kupada oynayanlar) gereksiz yere onlarca istek
+    atmasını önlüyor."""
     all_data = []
     page = 1
-    while True:
+    while page <= max_pages:
         result = api_get(path, {**params, "page": page})
         all_data.extend(result.get("data", []))
         pagination = result.get("pagination", {})
@@ -97,7 +101,7 @@ def main():
     print(f"{len(team_ids)} benzersiz takım bulundu, geçmişleri çekiliyor...")
 
     history_end = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
-    history_start = (datetime.now(timezone.utc) - timedelta(days=181)).strftime("%Y-%m-%d")
+    history_start = (datetime.now(timezone.utc) - timedelta(days=121)).strftime("%Y-%m-%d")
 
     def fetch_team_history(team_id: int) -> tuple[int, list]:
         fixtures = fetch_all_pages(
