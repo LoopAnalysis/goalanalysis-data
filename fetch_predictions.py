@@ -7,7 +7,7 @@ Kotlin tarafında (GoalPredictionRepository.kt) yaşıyor, hiç değişmedi.
 Bu script'in tek işi:
   1. Önümüzdeki 3 gün için tüm fikstürleri (maç listesini) Sportmonks'un
      KENDİ ORİJİNAL JSON formatında çeker
-  2. O fikstürlerdeki HER TAKIM için, son 120 günlük geçmişini (yine Sportmonks'un
+  2. O fikstürlerdeki HER TAKIM için, son 180 günlük geçmişini (yine Sportmonks'un
      orijinal formatında) BİR KERE çeker - aynı takım birden fazla maçta geçse bile
      tekrar tekrar çekmez (dedup)
   3. İkisini tek bir JSON dosyasına (docs/raw_data.json) yazar
@@ -81,34 +81,93 @@ def fetch_all_pages(path: str, params: dict, max_pages: int = 3) -> list:
     return all_data
 
 
+def slim_participant(participant: dict) -> dict:
+    """Bir takımın sadece ihtiyacımız olan alanları - logo/kısaltma/kuruluş yılı gibi
+    gereksiz meta veriler atılıyor."""
+    return {
+        "id": participant.get("id"),
+        "name": participant.get("name"),
+        "image_path": participant.get("image_path"),
+        "meta": {"location": (participant.get("meta") or {}).get("location")},
+    }
+
+
+def slim_fixture_for_history(fixture: dict) -> dict:
+    """Takım geçmişi için bir fixture'ın sadece Poisson hesabına giren alanları -
+    statistics'ten sadece SOT(86)/Corners(34) tutulur, scores'tan sadece CURRENT."""
+    scores = [s for s in (fixture.get("scores") or []) if s.get("description") == "CURRENT"]
+    stats = [
+        s for s in (fixture.get("statistics") or [])
+        if s.get("type_id") in (34, 42, 86)
+    ]
+    return {
+        "id": fixture.get("id"),
+        "starting_at": fixture.get("starting_at"),
+        "state_id": fixture.get("state_id"),
+        "result_info": fixture.get("result_info"),
+        "participants": [slim_participant(p) for p in (fixture.get("participants") or [])],
+        "scores": scores,
+        "statistics": stats,
+    }
+
+
+def slim_odds_for_upcoming(fixture: dict) -> list:
+    """Odds'tan SADECE 'Goals Over/Under 2.5' piyasasını tutuyoruz - onlarca farklı
+    piyasa/bahis şirketi kombinasyonu (dosya boyutunun asıl sebebi) tamamen atılıyor."""
+    odds = fixture.get("odds") or []
+    return [
+        {
+            "market_id": o.get("market_id"),
+            "bookmaker_id": o.get("bookmaker_id"),
+            "label": o.get("label"),
+            "total": o.get("total"),
+            "probability": o.get("probability"),
+        }
+        for o in odds
+        if o.get("market_id") == 80 and o.get("total") == "2.5"
+    ]
+
+
+def slim_upcoming_fixture(fixture: dict) -> dict:
+    return {
+        "id": fixture.get("id"),
+        "starting_at": fixture.get("starting_at"),
+        "state_id": fixture.get("state_id"),
+        "league": {"id": (fixture.get("league") or {}).get("id"), "name": (fixture.get("league") or {}).get("name")},
+        "participants": [slim_participant(p) for p in (fixture.get("participants") or [])],
+        "odds": slim_odds_for_upcoming(fixture),
+    }
+
+
 def main():
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     end_date = (datetime.now(timezone.utc) + timedelta(days=2)).strftime("%Y-%m-%d")
 
     print(f"Fikstürler çekiliyor: {today} -> {end_date}")
-    upcoming_fixtures = fetch_all_pages(
+    upcoming_fixtures_raw = fetch_all_pages(
         f"fixtures/between/{today}/{end_date}",
         {"include": "participants;league;odds"},
     )
-    upcoming_fixtures = list({f["id"]: f for f in upcoming_fixtures}.values())
+    upcoming_fixtures_raw = list({f["id"]: f for f in upcoming_fixtures_raw}.values())
+    upcoming_fixtures = [slim_upcoming_fixture(f) for f in upcoming_fixtures_raw]
     print(f"{len(upcoming_fixtures)} fikstür bulundu")
 
     team_ids = set()
-    for fixture in upcoming_fixtures:
+    for fixture in upcoming_fixtures_raw:
         for participant in fixture.get("participants") or []:
             if participant.get("id"):
                 team_ids.add(participant["id"])
     print(f"{len(team_ids)} benzersiz takım bulundu, geçmişleri çekiliyor...")
 
     history_end = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
-    history_start = (datetime.now(timezone.utc) - timedelta(days=121)).strftime("%Y-%m-%d")
+    history_start = (datetime.now(timezone.utc) - timedelta(days=181)).strftime("%Y-%m-%d")
 
     def fetch_team_history(team_id: int) -> tuple[int, list]:
         fixtures = fetch_all_pages(
             f"fixtures/between/{history_start}/{history_end}/{team_id}",
             {"include": "participants;scores;statistics"},
         )
-        return team_id, fixtures
+        return team_id, [slim_fixture_for_history(f) for f in fixtures]
 
     # Takımları SIRAYLA değil, AYNI ANDA (paralel) çekiyoruz - 10 takım birden. Sportmonks'un
     # saatlik kotası (3000 istek) buna rahatça izin veriyor, sadece anlık yoğunluğu (429/504)
