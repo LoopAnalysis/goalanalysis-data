@@ -37,18 +37,28 @@ BASE_URL = "https://api.sportmonks.com/v3/football"
 
 
 def api_get(path: str, params: dict) -> dict:
-    """429 (hız sınırı) durumunda otomatik olarak bekleyip tekrar dener."""
+    """429 (hız sınırı) VE 5xx (geçici sunucu hatası, örn. 504 Gateway Timeout)
+    durumunda otomatik olarak bekleyip tekrar dener."""
     params = {**params, "api_token": API_KEY}
-    for attempt in range(4):
-        response = requests.get(f"{BASE_URL}/{path}", params=params, timeout=30)
-        if response.status_code == 429:
-            wait = 2 ** attempt
-            print(f"  429 alındı, {wait}sn bekleniyor (deneme {attempt + 1}/4)...")
+    last_error = None
+    for attempt in range(6):
+        try:
+            response = requests.get(f"{BASE_URL}/{path}", params=params, timeout=60)
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            wait = min(2 ** attempt, 30)
+            print(f"  Ağ hatası ({e}), {wait}sn bekleniyor (deneme {attempt + 1}/6)...")
+            time.sleep(wait)
+            continue
+
+        if response.status_code == 429 or response.status_code >= 500:
+            wait = min(2 ** attempt, 30)
+            print(f"  {response.status_code} alındı, {wait}sn bekleniyor (deneme {attempt + 1}/6)...")
             time.sleep(wait)
             continue
         response.raise_for_status()
         return response.json()
-    raise RuntimeError("429 hatası - 4 denemeden sonra da başarısız oldu")
+    raise RuntimeError(f"6 denemeden sonra da başarısız oldu. Son hata: {last_error}")
 
 
 def fetch_all_pages(path: str, params: dict) -> list:
