@@ -149,6 +149,12 @@ def main():
         {"include": "participants;league;odds"},
     )
     upcoming_fixtures_raw = list({f["id"]: f for f in upcoming_fixtures_raw}.values())
+
+    # TEŞHİS: hangi state_id değerleri gerçekte geliyor, kaçar tane - filtre doğru mu görelim
+    from collections import Counter
+    state_counts = Counter(f.get("state_id") for f in upcoming_fixtures_raw)
+    print(f"Toplam {len(upcoming_fixtures_raw)} fikstür, state_id dağılımı: {dict(state_counts)}")
+
     # SADECE henüz oynanmamış maçları tutuyoruz - "önümüzdeki 3 gün" aralığında geçmiş
     # (o gün içinde ama saati geçmiş) maçlar da geliyor, onları burada ayıklıyoruz.
     upcoming_fixtures_raw = [f for f in upcoming_fixtures_raw if f.get("state_id") in (None, 1)]
