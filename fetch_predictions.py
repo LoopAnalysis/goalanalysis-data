@@ -154,6 +154,11 @@ def main():
     from collections import Counter
     state_counts = Counter(f.get("state_id") for f in upcoming_fixtures_raw)
     print(f"Toplam {len(upcoming_fixtures_raw)} fikstür, state_id dağılımı: {dict(state_counts)}")
+    print(f"Şu anki UTC zamanı: {datetime.now(timezone.utc).isoformat()}")
+    # İlk 10 maçın tarihini/ligini/durumunu göster - gerçekten ne olduğunu görelim
+    for f in upcoming_fixtures_raw[:10]:
+        league_name = (f.get("league") or {}).get("name", "?")
+        print(f"  - {f.get('starting_at')} | state={f.get('state_id')} | {league_name}")
 
     # SADECE henüz oynanmamış maçları tutuyoruz - "önümüzdeki 3 gün" aralığında geçmiş
     # (o gün içinde ama saati geçmiş) maçlar da geliyor, onları burada ayıklıyoruz.
