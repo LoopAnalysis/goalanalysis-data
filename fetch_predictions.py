@@ -140,32 +140,51 @@ def slim_upcoming_fixture(fixture: dict) -> dict:
 
 
 def main():
+    # ÖNEMLİ: aralık geriye doğru 4 gün genişletildi (sadece bugünden ileri değil) - bunun
+    # sebebi, bekleyen (henüz sonucu Kotlin tarafında işlenmemiş) tahminlerin sonuçlarını da
+    # BURADAN karşılamak. Örneğin 2 gün önce "yaklaşan" diye kaydedilen bir maç, bugün
+    # itibariyle geçmişte kalmış olabilir - o maçın SONUCUNU da bu pencerede yakalamamız lazım,
+    # yoksa telefon o sonucu öğrenmek için yine Sportmonks'a (getFixtureById) gitmek zorunda kalır.
+    fetch_start = (datetime.now(timezone.utc) - timedelta(days=4)).strftime("%Y-%m-%d")
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     end_date = (datetime.now(timezone.utc) + timedelta(days=2)).strftime("%Y-%m-%d")
 
-    print(f"Fikstürler çekiliyor: {today} -> {end_date}")
-    upcoming_fixtures_raw = fetch_all_pages(
-        f"fixtures/between/{today}/{end_date}",
-        {"include": "participants;league;odds"},
-        max_pages=100,  # ana maç listesi için sayfa sınırı YOK - sadece takım geçmişinde 3 ile sınırlıyoruz
+    print(f"Fikstürler çekiliyor: {fetch_start} -> {end_date}")
+    all_fixtures_raw = fetch_all_pages(
+        f"fixtures/between/{fetch_start}/{end_date}",
+        {"include": "participants;league;odds;scores"},
+        max_pages=200,  # ana maç listesi için sayfa sınırı YOK - sadece takım geçmişinde 3 ile sınırlıyoruz
     )
-    upcoming_fixtures_raw = list({f["id"]: f for f in upcoming_fixtures_raw}.values())
+    all_fixtures_raw = list({f["id"]: f for f in all_fixtures_raw}.values())
 
-    # TEŞHİS: hangi state_id değerleri gerçekte geliyor, kaçar tane - filtre doğru mu görelim
     from collections import Counter
-    state_counts = Counter(f.get("state_id") for f in upcoming_fixtures_raw)
-    print(f"Toplam {len(upcoming_fixtures_raw)} fikstür, state_id dağılımı: {dict(state_counts)}")
-    print(f"Şu anki UTC zamanı: {datetime.now(timezone.utc).isoformat()}")
-    # İlk 10 maçın tarihini/ligini/durumunu göster - gerçekten ne olduğunu görelim
-    for f in upcoming_fixtures_raw[:10]:
-        league_name = (f.get("league") or {}).get("name", "?")
-        print(f"  - {f.get('starting_at')} | state={f.get('state_id')} | {league_name}")
+    state_counts = Counter(f.get("state_id") for f in all_fixtures_raw)
+    print(f"Toplam {len(all_fixtures_raw)} fikstür, state_id dağılımı: {dict(state_counts)}")
 
-    # SADECE henüz oynanmamış maçları tutuyoruz - "önümüzdeki 3 gün" aralığında geçmiş
-    # (o gün içinde ama saati geçmiş) maçlar da geliyor, onları burada ayıklıyoruz.
-    upcoming_fixtures_raw = [f for f in upcoming_fixtures_raw if f.get("state_id") in (None, 1)]
+    # SADECE henüz oynanmamış maçları tutuyoruz - YENİ tahmin üretmek için bunlar kullanılıyor.
+    upcoming_fixtures_raw = [f for f in all_fixtures_raw if f.get("state_id") in (None, 1)]
     upcoming_fixtures = [slim_upcoming_fixture(f) for f in upcoming_fixtures_raw]
     print(f"{len(upcoming_fixtures)} henüz oynanmamış fikstür bulundu")
+
+    # BEKLEYEN tahminlerin SONUÇLARINI kontrol etmek için - Kotlin tarafındaki
+    # "isDefinitelyFinished" ile BİREBİR aynı mantık: state_id 5/6/7 KESİN bitmiş demek,
+    # ya da state_id boşken result_info doluysa yine bitmiş sayılıyor.
+    FINISHED_STATE_IDS = {5, 6, 7}
+    recent_results = {}
+    for f in all_fixtures_raw:
+        state_id = f.get("state_id")
+        result_info = f.get("result_info")
+        is_finished = state_id in FINISHED_STATE_IDS or (state_id is None and result_info)
+        if not is_finished:
+            continue
+        scores = [s for s in (f.get("scores") or []) if s.get("description") == "CURRENT"]
+        recent_results[str(f["id"])] = {
+            "id": f["id"],
+            "state_id": state_id,
+            "result_info": result_info,
+            "scores": scores,
+        }
+    print(f"{len(recent_results)} sonuçlanmış maç bulundu (bekleyen tahminlerin çözülmesi için)")
 
     team_ids = set()
     for fixture in upcoming_fixtures_raw:
@@ -205,6 +224,7 @@ def main():
     output = {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "upcomingFixtures": upcoming_fixtures,
+        "recentResults": recent_results,
         "teamHistories": team_histories,
     }
 
