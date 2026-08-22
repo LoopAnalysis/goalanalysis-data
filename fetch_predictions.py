@@ -141,12 +141,15 @@ def slim_upcoming_fixture(fixture: dict) -> dict:
 
 
 def main():
-    # ÖNEMLİ: aralık geriye doğru 4 gün genişletildi (sadece bugünden ileri değil) - bunun
+    # ÖNEMLİ: aralık geriye doğru 14 GÜN genişletildi (sadece bugünden ileri değil) - bunun
     # sebebi, bekleyen (henüz sonucu Kotlin tarafında işlenmemiş) tahminlerin sonuçlarını da
-    # BURADAN karşılamak. Örneğin 2 gün önce "yaklaşan" diye kaydedilen bir maç, bugün
+    # BURADAN karşılamak. Örneğin birkaç gün önce "yaklaşan" diye kaydedilen bir maç, bugün
     # itibariyle geçmişte kalmış olabilir - o maçın SONUCUNU da bu pencerede yakalamamız lazım,
     # yoksa telefon o sonucu öğrenmek için yine Sportmonks'a (getFixtureById) gitmek zorunda kalır.
-    fetch_start = (datetime.now(timezone.utc) - timedelta(days=4)).strftime("%Y-%m-%d")
+    # 14 gün, "uygulamayı birkaç gün açmadım" gibi durumlarda bile bekleyen tahminlerin
+    # ÇÖZÜLEBİLME şansını koruyor - pencere her çalıştırmada kaydığı için, bundan daha eski
+    # kalan bekleyen tahminler yine de sonsuza kadar çözülemez kalabilir (bilinen bir sınır).
+    fetch_start = (datetime.now(timezone.utc) - timedelta(days=14)).strftime("%Y-%m-%d")
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     end_date = (datetime.now(timezone.utc) + timedelta(days=2)).strftime("%Y-%m-%d")
 
@@ -182,6 +185,8 @@ def main():
     for f in all_fixtures_raw:
         if not is_definitely_finished(f):
             continue
+        state_id = f.get("state_id")
+        result_info = f.get("result_info")
         scores = [s for s in (f.get("scores") or []) if s.get("description") == "CURRENT"]
         recent_results[str(f["id"])] = {
             "id": f["id"],
