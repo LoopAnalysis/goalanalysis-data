@@ -36,6 +36,7 @@ if not API_KEY:
     sys.exit(1)
 
 BASE_URL = "https://api.sportmonks.com/v3/football"
+FINISHED_STATE_IDS = {5, 6, 7}  # Kotlin tarafındaki ile BİREBİR aynı - "kesin bitmiş" durum kodları
 
 
 def api_get(path: str, params: dict) -> dict:
@@ -162,20 +163,24 @@ def main():
     print(f"Toplam {len(all_fixtures_raw)} fikstür, state_id dağılımı: {dict(state_counts)}")
 
     # SADECE henüz oynanmamış maçları tutuyoruz - YENİ tahmin üretmek için bunlar kullanılıyor.
-    upcoming_fixtures_raw = [f for f in all_fixtures_raw if f.get("state_id") in (None, 1)]
+    # ÖNEMLİ DÜZELTME: "henüz oynanmamış" demek sadece state_id boş/1 değil - bazı bitmiş
+    # maçlarda Sportmonks state_id'yi BOŞ bırakıp bitti bilgisini SADECE result_info alanında
+    # veriyor. Kotlin tarafındaki "isDefinitelyFinished" ile BİREBİR aynı mantığı kullanıyoruz,
+    # yoksa bitmiş bir maç yanlışlıkla "yaklaşan" listesinde kalabiliyor.
+    def is_definitely_finished(f: dict) -> bool:
+        state_id = f.get("state_id")
+        result_info = f.get("result_info")
+        return state_id in FINISHED_STATE_IDS or (state_id is None and bool(result_info))
+
+    upcoming_fixtures_raw = [f for f in all_fixtures_raw if f.get("state_id") in (None, 1) and not is_definitely_finished(f)]
     upcoming_fixtures = [slim_upcoming_fixture(f) for f in upcoming_fixtures_raw]
     print(f"{len(upcoming_fixtures)} henüz oynanmamış fikstür bulundu")
 
-    # BEKLEYEN tahminlerin SONUÇLARINI kontrol etmek için - Kotlin tarafındaki
-    # "isDefinitelyFinished" ile BİREBİR aynı mantık: state_id 5/6/7 KESİN bitmiş demek,
-    # ya da state_id boşken result_info doluysa yine bitmiş sayılıyor.
-    FINISHED_STATE_IDS = {5, 6, 7}
+    # BEKLEYEN tahminlerin SONUÇLARINI kontrol etmek için - aynı is_definitely_finished()
+    # fonksiyonu kullanılıyor (yukarıdaki upcoming filtresiyle BİREBİR aynı mantık).
     recent_results = {}
     for f in all_fixtures_raw:
-        state_id = f.get("state_id")
-        result_info = f.get("result_info")
-        is_finished = state_id in FINISHED_STATE_IDS or (state_id is None and result_info)
-        if not is_finished:
+        if not is_definitely_finished(f):
             continue
         scores = [s for s in (f.get("scores") or []) if s.get("description") == "CURRENT"]
         recent_results[str(f["id"])] = {
