@@ -205,6 +205,9 @@ def main():
         fixtures = fetch_all_pages(
             f"fixtures/between/{history_start}/{history_end}/{team_id}",
             {"include": "participants;scores;statistics"},
+            max_pages=20,  # 180 günde en aktif takım bile (3 kupa birden) genelde ~75-90 maç
+            # yapar - 20 sayfa (~500 maç) bolca güvenlik payı, "en yeni 10 maç eskiye ait
+            # sayfalarda kaldıysa kaçırırız" riskini pratik olarak ortadan kaldırıyor.
         )
         return team_id, [slim_fixture_for_history(f) for f in fixtures]
 
