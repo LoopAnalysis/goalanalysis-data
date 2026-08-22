@@ -147,6 +147,7 @@ def main():
     upcoming_fixtures_raw = fetch_all_pages(
         f"fixtures/between/{today}/{end_date}",
         {"include": "participants;league;odds"},
+        max_pages=100,  # ana maç listesi için sayfa sınırı YOK - sadece takım geçmişinde 3 ile sınırlıyoruz
     )
     upcoming_fixtures_raw = list({f["id"]: f for f in upcoming_fixtures_raw}.values())
 
