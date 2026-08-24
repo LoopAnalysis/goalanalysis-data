@@ -130,11 +130,13 @@ def slim_odds_for_upcoming(fixture: dict) -> list:
 
 
 def slim_upcoming_fixture(fixture: dict) -> dict:
+    league = fixture.get("league") or {}
+    country_name = ((league.get("country") or {}).get("name"))
     return {
         "id": fixture.get("id"),
         "starting_at": fixture.get("starting_at"),
         "state_id": fixture.get("state_id"),
-        "league": {"id": (fixture.get("league") or {}).get("id"), "name": (fixture.get("league") or {}).get("name")},
+        "league": {"id": league.get("id"), "name": league.get("name"), "country_name": country_name},
         "participants": [slim_participant(p) for p in (fixture.get("participants") or [])],
         "odds": slim_odds_for_upcoming(fixture),
     }
@@ -156,7 +158,7 @@ def main():
     print(f"Fikstürler çekiliyor: {fetch_start} -> {end_date}")
     all_fixtures_raw = fetch_all_pages(
         f"fixtures/between/{fetch_start}/{end_date}",
-        {"include": "participants;league;odds;scores"},
+        {"include": "participants;league.country;odds;scores"},
         max_pages=200,  # ana maç listesi için sayfa sınırı YOK - sadece takım geçmişinde 3 ile sınırlıyoruz
     )
     all_fixtures_raw = list({f["id"]: f for f in all_fixtures_raw}.values())
