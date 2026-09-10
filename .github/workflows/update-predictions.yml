@@ -28,7 +28,8 @@ jobs:
       - name: Ham veriyi çek
         env:
           SPORTMONKS_API_KEY: ${{ secrets.SPORTMONKS_API_KEY }}
-        run: python fetch_predictions.py
+          PYTHONUNBUFFERED: "1"
+        run: python -u fetch_predictions.py
 
       - name: Sonucu GitHub'a geri kaydet (commit + push)
         run: |
@@ -36,4 +37,27 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add docs/raw_data.json
           git diff --staged --quiet || git commit -m "Otomatik güncelleme: $(date -u +'%Y-%m-%d %H:%M UTC')"
-          git push
+          # PUSH YARIŞI: elle tetiklenen bir çalıştırma ile saatlik otomatik olan (ya da iki
+          # elle tetikleme) aynı ana denk gelirse, ikisi de aynı anda push etmeye çalışabilir -
+          # önce push eden kazanır, öteki "rejected (fetch first)" alır. TEK seferlik
+          # pull+push yeterli değil: pull ile push arasındaki kısa an içinde üçüncü bir
+          # çalıştırma araya girebilir. Bunun yerine push'u birkaç kez DENEYEN bir döngü
+          # kullanıyoruz - her reddedilişte rastgele bir süre bekleyip (aynı anda tekrar
+          # çakışmayı azaltmak için) en güncel hale senkronize oluyor ve tekrar deniyoruz.
+          # Çakışma çıkarsa HER ZAMAN bizim (en yeni çekilen) veriyi esas alıyoruz (-X ours) -
+          # bu bir "veri kaybı" değil, iki çalıştırma da zaten aynı amaçla (en güncel
+          # fikstürü yayınlamak) çalışıyor.
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              echo "Push başarılı (deneme $attempt/5)."
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "5 denemeden sonra push başarısız oldu, bir sonraki saatlik çalıştırmada tekrar denenecek." >&2
+              exit 1
+            fi
+            wait_seconds=$(( (RANDOM % 10) + 5 ))
+            echo "Push reddedildi (deneme $attempt/5), ${wait_seconds}sn beklenip senkronize edilecek..."
+            sleep "$wait_seconds"
+            git pull --rebase -X ours origin main || git pull --no-rebase -X ours origin main
+          done
