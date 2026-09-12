@@ -3,7 +3,7 @@ name: Tahminleri Güncelle
 on:
   schedule:
     # Her saat başı çalışır (UTC saatine göre - cron her zaman UTC kullanır)
-    - cron: "0 * * * *"
+    - cron: "0/30 * * * *"
   # GitHub'ın "Actions" sekmesinden elle de tetikleyebilmen için:
   workflow_dispatch: {}
 
