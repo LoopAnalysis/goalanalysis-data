@@ -113,8 +113,18 @@ def slim_fixture_for_history(fixture: dict) -> dict:
 
 
 def slim_odds_for_upcoming(fixture: dict) -> list:
-    """Odds'tan SADECE 'Goals Over/Under 2.5' piyasasını tutuyoruz - onlarca farklı
-    piyasa/bahis şirketi kombinasyonu (dosya boyutunun asıl sebebi) tamamen atılıyor."""
+    """Odds'tan SADECE 'Goals Over/Under 2.5' (gol) VE 'Total Corners' (korner, market_id=68)
+    piyasalarını tutuyoruz - onlarca farklı piyasa/bahis şirketi kombinasyonu (dosya boyutunun
+    asıl sebebi) tamamen atılıyor.
+
+    KORNER ÇİZGİSİ NEDEN GOL GİBİ TEK BİR SABİT DEĞİL: gol piyasasında hemen her lig/maç için
+    "2.5" evrensel bir çizgiyken, korner toplamı ligden lige (hatta maçtan maça) 8.5-11.5 gibi
+    farklı değerler alabiliyor - burada (veri ÇEKME aşamasında, canlı API'ye bakmadan) hangi
+    çizginin o maçta gerçekten mevcut olacağını bilemeyiz. Bu yüzden market_id=68'in TÜM
+    çizgilerini (total değeri ne olursa olsun) olduğu gibi tutuyoruz - hangi çizginin
+    kullanılacağına Kotlin tarafı (GoalPredictionRepository.kt'deki
+    extractCornerMarketOddsSnapshot, sabit CORNER_MARKET_TOTAL_LINE) okuma anında karar veriyor.
+    """
     odds = fixture.get("odds") or []
     return [
         {
@@ -125,7 +135,7 @@ def slim_odds_for_upcoming(fixture: dict) -> list:
             "probability": o.get("probability"),
         }
         for o in odds
-        if o.get("market_id") == 80 and o.get("total") == "2.5"
+        if (o.get("market_id") == 80 and o.get("total") == "2.5") or o.get("market_id") == 68
     ]
 
 
@@ -158,7 +168,11 @@ def main():
     print(f"Fikstürler çekiliyor: {fetch_start} -> {end_date}")
     all_fixtures_raw = fetch_all_pages(
         f"fixtures/between/{fetch_start}/{end_date}",
-        {"include": "participants;league.country;odds;scores"},
+        # "statistics" KORNER PERFORMANSI İÇİN eklendi: bekleyen bir tahminin gerçek sonucunu
+        # (aşağıdaki recent_results) çözerken artık sadece skor değil, köşe vuruşu sayısı da
+        # (type_id=34) lazım - GoalPredictionRepository.kt'deki resolvePendingPredictions()
+        # bunu actualTotalCorners/cornerWasCorrect'e dönüştürüyor.
+        {"include": "participants;league.country;odds;scores;statistics"},
         max_pages=200,  # ana maç listesi için sayfa sınırı YOK - sadece takım geçmişinde 3 ile sınırlıyoruz
     )
     all_fixtures_raw = list({f["id"]: f for f in all_fixtures_raw}.values())
@@ -190,11 +204,16 @@ def main():
         state_id = f.get("state_id")
         result_info = f.get("result_info")
         scores = [s for s in (f.get("scores") or []) if s.get("description") == "CURRENT"]
+        # KORNER SONUCU İÇİN: sadece köşe vuruşu (type_id=34) istatistiği tutuluyor - şut/diğer
+        # istatistik tipleri burada gerekmiyor (onlar zaten sadece takım GEÇMİŞİ için,
+        # slim_fixture_for_history üzerinden, ayrıca çekiliyor).
+        corner_stats = [s for s in (f.get("statistics") or []) if s.get("type_id") == 34]
         recent_results[str(f["id"])] = {
             "id": f["id"],
             "state_id": state_id,
             "result_info": result_info,
             "scores": scores,
+            "statistics": corner_stats,
         }
     print(f"{len(recent_results)} sonuçlanmış maç bulundu (bekleyen tahminlerin çözülmesi için)")
 
