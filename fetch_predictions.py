@@ -93,9 +93,36 @@ def slim_participant(participant: dict) -> dict:
     }
 
 
+def first_half_card_statistics(fixture: dict) -> list:
+    """İLK YARI KART TAHMİNİ İÇİN: Sportmonks'un "periods.statistics" include'undaki, description
+    alanı GERÇEKTEN '1st-half' string'i olan (bir test scripti - test_periods_statistics.py - ile
+    gerçek bir API yanıtına bakılarak doğrulandı) TEK period'un statistics listesinden, sadece
+    sarı kart (type_id=84) girdilerini süzer. Dönen şekil normal (maç-toplam) 'statistics'
+    alanıyla BİREBİR AYNI ({participant_id, type_id, data:{value}}) - bu sayede Kotlin tarafı
+    (sumStatForTeam) periods kavramını hiç bilmeden, düz bir statistics listesi gibi okuyabiliyor.
+    Bu maçta hiç period verisi yoksa (henüz oynanmamış upcoming fixture, ya da o ligde Sportmonks
+    vermiyor) boş liste döner - "veri yok" ile "0 kart oldu" birbirine karışmasın diye Kotlin
+    tarafında ayrıca None/boş kontrolü yapılıyor."""
+    periods = fixture.get("periods") or []
+    first_half = next((p for p in periods if p.get("description") == "1st-half"), None)
+    if not first_half:
+        return []
+    return [
+        {
+            "participant_id": s.get("participant_id"),
+            "type_id": s.get("type_id"),
+            "data": s.get("data"),
+        }
+        for s in (first_half.get("statistics") or [])
+        if s.get("type_id") == 84
+    ]
+
+
 def slim_fixture_for_history(fixture: dict) -> dict:
     """Takım geçmişi için bir fixture'ın sadece Poisson hesabına giren alanları -
-    statistics'ten sadece SOT(86)/Corners(34) tutulur, scores'tan sadece CURRENT."""
+    statistics'ten sadece SOT(86)/Corners(34) tutulur, scores'tan sadece CURRENT.
+    first_half_statistics: İLK YARI KART tahmini için, sadece ilk yarıya scoped sarı kart
+    (type_id=84) verisi - bkz. first_half_card_statistics()."""
     scores = [s for s in (fixture.get("scores") or []) if s.get("description") == "CURRENT"]
     stats = [
         s for s in (fixture.get("statistics") or [])
@@ -109,6 +136,7 @@ def slim_fixture_for_history(fixture: dict) -> dict:
         "participants": [slim_participant(p) for p in (fixture.get("participants") or [])],
         "scores": scores,
         "statistics": stats,
+        "first_half_statistics": first_half_card_statistics(fixture),
     }
 
 
@@ -172,7 +200,10 @@ def main():
         # (aşağıdaki recent_results) çözerken artık sadece skor değil, köşe vuruşu sayısı da
         # (type_id=34) lazım - GoalPredictionRepository.kt'deki resolvePendingPredictions()
         # bunu actualTotalCorners/cornerWasCorrect'e dönüştürüyor.
-        {"include": "participants;league.country;odds;scores;statistics"},
+        # "periods.statistics" İLK YARI KART TAHMİNİ İÇİN eklendi: aynı resolvePendingPredictions()
+        # akışı, artık ilk yarıya scoped sarı kart sayısını da (first_half_card_statistics())
+        # çözebilmek için bu period bazlı veriye ihtiyaç duyuyor.
+        {"include": "participants;league.country;odds;scores;statistics;periods.statistics"},
         max_pages=200,  # ana maç listesi için sayfa sınırı YOK - sadece takım geçmişinde 3 ile sınırlıyoruz
     )
     all_fixtures_raw = list({f["id"]: f for f in all_fixtures_raw}.values())
@@ -208,12 +239,17 @@ def main():
         # istatistik tipleri burada gerekmiyor (onlar zaten sadece takım GEÇMİŞİ için,
         # slim_fixture_for_history üzerinden, ayrıca çekiliyor).
         corner_stats = [s for s in (f.get("statistics") or []) if s.get("type_id") == 34]
+        # İLK YARI KART SONUCU İÇİN: bkz. first_half_card_statistics() - bu bekleyen tahminin
+        # gerçek "ilk yarı toplam sarı kart" sayısını GoalPredictionRepository.kt'deki
+        # resolvePendingPredictions() çözebilsin diye.
+        first_half_card_stats = first_half_card_statistics(f)
         recent_results[str(f["id"])] = {
             "id": f["id"],
             "state_id": state_id,
             "result_info": result_info,
             "scores": scores,
             "statistics": corner_stats,
+            "first_half_statistics": first_half_card_stats,
         }
     print(f"{len(recent_results)} sonuçlanmış maç bulundu (bekleyen tahminlerin çözülmesi için)")
 
@@ -230,7 +266,9 @@ def main():
     def fetch_team_history(team_id: int) -> tuple[int, list]:
         fixtures = fetch_all_pages(
             f"fixtures/between/{history_start}/{history_end}/{team_id}",
-            {"include": "participants;scores;statistics"},
+            # "periods.statistics" İLK YARI KART TAHMİNİ İÇİN eklendi - bkz.
+            # first_half_card_statistics()/slim_fixture_for_history() açıklaması.
+            {"include": "participants;scores;statistics;periods.statistics"},
             max_pages=20,  # 180 günde en aktif takım bile (3 kupa birden) genelde ~75-90 maç
             # yapar - 20 sayfa (~500 maç) bolca güvenlik payı, "en yeni 10 maç eskiye ait
             # sayfalarda kaldıysa kaçırırız" riskini pratik olarak ortadan kaldırıyor.
